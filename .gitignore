@@ -32,7 +32,12 @@ dist
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.next-dev.*.log
 
 # Misc
 .DS_Store
 *.pem
+
+#agent skills
+.agents/
+skills-lock.json

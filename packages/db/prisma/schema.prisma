@@ -1,0 +1,431 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum TenantRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum DataSourceType {
+  CSV
+  GOOGLE_SHEETS
+  WEBHOOK
+}
+
+enum DataSourceStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum IngestionStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum MetricKind {
+  RAW
+  COMPUTED
+}
+
+enum MetricValueType {
+  NUMBER
+  STRING
+  BOOLEAN
+}
+
+enum ChartType {
+  LINE
+  BAR
+  KPI
+  TABLE
+}
+
+enum AnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AnomalyStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum AlertDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+model User {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  name         String?
+  passwordHash String?
+  imageUrl     String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  memberships  TenantMembership[]
+  ownedTenants Tenant[]           @relation("TenantOwner")
+
+  @@index([email])
+}
+
+model Tenant {
+  id                  String                  @id @default(cuid())
+  name                String
+  slug                String                  @unique
+  ownerId             String
+  alertEmail          String?
+  anomalyScheduleMins Int                     @default(60)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  owner               User                    @relation("TenantOwner", fields: [ownerId], references: [id])
+  memberships         TenantMembership[]
+  dataSources         DataSource[]
+  webhookEndpoints    WebhookEndpoint[]
+  metrics             Metric[]
+  metricPoints        MetricPoint[]
+  rawEvents           RawEvent[]
+  ingestionRuns       IngestionRun[]
+  ingestionErrors     IngestionError[]
+  dashboards          Dashboard[]
+  dashboardWidgets    DashboardWidget[]
+  widgetMetrics       DashboardWidgetMetric[]
+  embedConfigs        EmbedConfig[]
+  embedAllowedDomains EmbedAllowedDomain[]
+  embedVisibleMetrics EmbedVisibleMetric[]
+  apiKeys             ApiKey[]
+  anomalyEvents       AnomalyEvent[]
+  alertDeliveries     AlertDelivery[]
+
+  @@index([ownerId])
+}
+
+model TenantMembership {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(MEMBER)
+  createdAt DateTime   @default(now())
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model DataSource {
+  id              String              @id @default(cuid())
+  tenantId        String
+  type            DataSourceType
+  name            String
+  status          DataSourceStatus    @default(ACTIVE)
+  config          Json
+  lastSyncedAt    DateTime?
+  nextSyncAt      DateTime?
+  recordCount     Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fieldMappings   DataSourceMapping[]
+  ingestionRuns   IngestionRun[]
+  ingestionErrors IngestionError[]
+  metricPoints    MetricPoint[]
+  rawEvents       RawEvent[]
+
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+}
+
+model DataSourceMapping {
+  id             String          @id @default(cuid())
+  tenantId       String
+  dataSourceId   String
+  sourceField    String
+  metricId       String?
+  timestampField Boolean         @default(false)
+  valueType      MetricValueType
+  transform      Json?
+  createdAt      DateTime        @default(now())
+  dataSource     DataSource      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  metric         Metric?         @relation(fields: [metricId], references: [id], onDelete: SetNull)
+
+  @@unique([dataSourceId, sourceField])
+  @@index([tenantId, dataSourceId])
+  @@index([tenantId, metricId])
+}
+
+model WebhookEndpoint {
+  id           String    @id @default(cuid())
+  tenantId     String
+  dataSourceId String?
+  name         String
+  publicId     String    @unique
+  secretHash   String
+  enabled      Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  rotatedAt    DateTime?
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, enabled])
+}
+
+model Metric {
+  id                  String                  @id @default(cuid())
+  tenantId            String
+  key                 String
+  name                String
+  description         String?
+  kind                MetricKind              @default(RAW)
+  valueType           MetricValueType         @default(NUMBER)
+  unit                String?
+  formula             String?
+  goalTarget          Float?
+  anomalyEnabled      Boolean                 @default(true)
+  anomalyConfig       Json?
+  embedEnabled        Boolean                 @default(false)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  mappings            DataSourceMapping[]
+  metricPoints        MetricPoint[]
+  widgetMetrics       DashboardWidgetMetric[]
+  embedVisibleMetrics EmbedVisibleMetric[]
+  anomalyEvents       AnomalyEvent[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, embedEnabled])
+}
+
+model RawEvent {
+  id           String     @id @default(cuid())
+  tenantId     String
+  dataSourceId String
+  receivedAt   DateTime   @default(now())
+  eventTime    DateTime?
+  payload      Json
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, dataSourceId, receivedAt])
+}
+
+model MetricPoint {
+  id           String      @id @default(cuid())
+  tenantId     String
+  metricId     String
+  dataSourceId String?
+  timestamp    DateTime
+  numberValue  Float?
+  stringValue  String?
+  booleanValue Boolean?
+  dimensions   Json?
+  rawEventId   String?
+  createdAt    DateTime    @default(now())
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  metric       Metric      @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  dataSource   DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, metricId, timestamp])
+  @@index([tenantId, dataSourceId, timestamp])
+}
+
+model IngestionRun {
+  id              String           @id @default(cuid())
+  tenantId        String
+  dataSourceId    String
+  status          IngestionStatus  @default(PENDING)
+  startedAt       DateTime         @default(now())
+  finishedAt      DateTime?
+  rowsRead        Int              @default(0)
+  rowsInserted    Int              @default(0)
+  errorCount      Int              @default(0)
+  summary         Json?
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dataSource      DataSource       @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  ingestionErrors IngestionError[]
+
+  @@index([tenantId, dataSourceId, startedAt])
+  @@index([tenantId, status])
+}
+
+model IngestionError {
+  id           String        @id @default(cuid())
+  tenantId     String
+  dataSourceId String
+  runId        String?
+  rowNumber    Int?
+  fieldName    String?
+  message      String
+  rawValue     String?
+  createdAt    DateTime      @default(now())
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dataSource   DataSource    @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  run          IngestionRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, dataSourceId, createdAt])
+}
+
+model Dashboard {
+  id        String            @id @default(cuid())
+  tenantId  String
+  name      String
+  isDefault Boolean           @default(false)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  widgets   DashboardWidget[]
+  embeds    EmbedConfig[]
+
+  @@index([tenantId, isDefault])
+}
+
+model DashboardWidget {
+  id            String                  @id @default(cuid())
+  tenantId      String
+  dashboardId   String
+  title         String
+  chartType     ChartType
+  x             Int
+  y             Int
+  width         Int
+  height        Int
+  config        Json?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dashboard     Dashboard               @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  widgetMetrics DashboardWidgetMetric[]
+
+  @@index([tenantId, dashboardId])
+}
+
+model DashboardWidgetMetric {
+  id       String          @id @default(cuid())
+  tenantId String
+  widgetId String
+  metricId String
+  role     String          @default("primary")
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  widget   DashboardWidget @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+  metric   Metric          @relation(fields: [metricId], references: [id], onDelete: Cascade)
+
+  @@unique([widgetId, metricId, role])
+  @@index([tenantId, metricId])
+}
+
+model EmbedConfig {
+  id             String               @id @default(cuid())
+  tenantId       String
+  dashboardId    String
+  name           String
+  publicToken    String               @unique
+  enabled        Boolean              @default(true)
+  theme          Json?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dashboard      Dashboard            @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  allowedDomains EmbedAllowedDomain[]
+  visibleMetrics EmbedVisibleMetric[]
+
+  @@index([tenantId, enabled])
+}
+
+model EmbedAllowedDomain {
+  id            String      @id @default(cuid())
+  tenantId      String
+  embedConfigId String
+  domain        String
+  createdAt     DateTime    @default(now())
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  embedConfig   EmbedConfig @relation(fields: [embedConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([embedConfigId, domain])
+  @@index([tenantId, domain])
+}
+
+model EmbedVisibleMetric {
+  id            String      @id @default(cuid())
+  tenantId      String
+  embedConfigId String
+  metricId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  embedConfig   EmbedConfig @relation(fields: [embedConfigId], references: [id], onDelete: Cascade)
+  metric        Metric      @relation(fields: [metricId], references: [id], onDelete: Cascade)
+
+  @@unique([embedConfigId, metricId])
+  @@index([tenantId, metricId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  keyHash    String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, revokedAt])
+}
+
+model AnomalyEvent {
+  id              String          @id @default(cuid())
+  tenantId        String
+  metricId        String
+  status          AnomalyStatus   @default(OPEN)
+  severity        AnomalySeverity
+  startedAt       DateTime
+  resolvedAt      DateTime?
+  observedValue   Float
+  expectedValue   Float
+  deviation       Float
+  modelSnapshot   Json
+  dedupeKey       String
+  createdAt       DateTime        @default(now())
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  metric          Metric          @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  alertDeliveries AlertDelivery[]
+
+  @@unique([tenantId, metricId, dedupeKey])
+  @@index([tenantId, metricId, startedAt])
+  @@index([tenantId, status])
+}
+
+model AlertDelivery {
+  id             String              @id @default(cuid())
+  tenantId       String
+  anomalyEventId String
+  email          String
+  status         AlertDeliveryStatus @default(PENDING)
+  providerId     String?
+  errorMessage   String?
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  anomalyEvent   AnomalyEvent        @relation(fields: [anomalyEventId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, anomalyEventId])
+  @@index([tenantId, status])
+}
