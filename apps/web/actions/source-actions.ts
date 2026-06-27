@@ -1,9 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
-import { getCurrentUser } from "@/lib/auth";
 import {
   CSV_ERROR_SAMPLE_COUNT,
   CSV_PREVIEW_ROW_COUNT,
@@ -16,7 +14,8 @@ import {
   parseTimestamp,
   slugifyMetricKey,
 } from "@/lib/csv-ingestion";
-import { prisma, withTenantContext } from "@repo/db";
+import { requireActiveTenantId } from "@/lib/tenant";
+import { withTenantContext } from "@repo/db";
 
 export type CsvPreviewState = {
   error?: string;
@@ -43,30 +42,6 @@ export type CsvImportState = {
   };
 };
 
-type ActiveTenant = {
-  tenantId: string;
-};
-
-async function requireActiveTenant(): Promise<ActiveTenant> {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const membership = await prisma.tenantMembership.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "asc" },
-    select: { tenantId: true },
-  });
-
-  if (!membership) {
-    throw new Error("Your account is not attached to a workspace.");
-  }
-
-  return membership;
-}
-
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
 
@@ -85,7 +60,7 @@ export async function previewCsvUpload(
   _previousState: CsvPreviewState,
   formData: FormData,
 ): Promise<CsvPreviewState> {
-  await requireActiveTenant();
+  await requireActiveTenantId();
 
   const file = formData.get("csvFile");
 
@@ -137,7 +112,7 @@ export async function importCsvUpload(
   _previousState: CsvImportState,
   formData: FormData,
 ): Promise<CsvImportState> {
-  const { tenantId } = await requireActiveTenant();
+  const tenantId = await requireActiveTenantId();
   const csvText = getString(formData, "csvText");
   const sourceName = getString(formData, "sourceName");
   const timestampColumn = getString(formData, "timestampColumn");

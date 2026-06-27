@@ -96,6 +96,10 @@ export async function signupUser(
       select: { id: true },
     });
 
+    await tx.$executeRaw`
+      SELECT set_config('app.current_user_id', ${user.id}, true)
+    `;
+
     const tenant = await tx.tenant.create({
       data: {
         name: workspaceName,

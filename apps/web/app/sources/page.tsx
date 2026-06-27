@@ -7,7 +7,6 @@ import {
   FileTextIcon,
   LogOutIcon,
 } from "lucide-react";
-import { redirect } from "next/navigation";
 
 import { logoutUser } from "@/actions/user-actions";
 import { CsvIngestionForm } from "@/components/sources/csv-ingestion-form";
@@ -22,8 +21,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { getCurrentUser } from "@/lib/auth";
-import { prisma, withTenantContext } from "@repo/db";
+import { getActiveTenant } from "@/lib/tenant";
+import { withTenantContext } from "@repo/db";
 
 function formatDate(date?: Date | null) {
   if (!date) {
@@ -65,28 +64,9 @@ function statusVariant(status: string) {
 }
 
 export default async function SourcesPage() {
-  const user = await getCurrentUser();
+  const activeTenant = await getActiveTenant();
 
-  if (!user) {
-    redirect("/login");
-  }
-
-  const membership = await prisma.tenantMembership.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "asc" },
-    select: {
-      role: true,
-      tenant: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-        },
-      },
-    },
-  });
-
-  if (!membership) {
+  if (!activeTenant) {
     return (
       <main className="min-h-svh bg-background p-6">
         <div className="mx-auto flex min-h-[calc(100svh-3rem)] max-w-3xl items-center">
@@ -111,6 +91,7 @@ export default async function SourcesPage() {
     );
   }
 
+  const { membership } = activeTenant;
   const tenantId = membership.tenant.id;
   const [sources, runs, errors, sourceCount, pointCount] =
     await withTenantContext(tenantId, async (tx) =>

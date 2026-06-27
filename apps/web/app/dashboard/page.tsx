@@ -13,7 +13,6 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
 } from "lucide-react";
-import { redirect } from "next/navigation";
 
 import { logoutUser } from "@/actions/user-actions";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +26,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { getCurrentUser } from "@/lib/auth";
-import { prisma, withTenantContext } from "@repo/db";
+import { getActiveTenant } from "@/lib/tenant";
+import { withTenantContext } from "@repo/db";
 
 function formatDate(date?: Date | null) {
   if (!date) {
@@ -99,31 +98,9 @@ function StatCard({
 }
 
 export default async function DashboardPage() {
-  const user = await getCurrentUser();
+  const activeTenant = await getActiveTenant();
 
-  if (!user) {
-    redirect("/login");
-  }
-
-  const membership = await prisma.tenantMembership.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "asc" },
-    select: {
-      role: true,
-      tenant: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          alertEmail: true,
-          anomalyScheduleMins: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
-
-  if (!membership) {
+  if (!activeTenant) {
     return (
       <main className="min-h-svh bg-background p-6">
         <div className="mx-auto flex min-h-[calc(100svh-3rem)] max-w-3xl items-center">
@@ -153,6 +130,7 @@ export default async function DashboardPage() {
     );
   }
 
+  const { user, membership } = activeTenant;
   const tenantId = membership.tenant.id;
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 

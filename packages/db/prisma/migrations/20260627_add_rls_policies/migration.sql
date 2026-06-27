@@ -1,3 +1,5 @@
+DROP POLICY IF EXISTS "user_tenant_access_Tenant" ON "Tenant";
+DROP POLICY IF EXISTS "user_tenant_access_TenantMembership" ON "TenantMembership";
 DROP POLICY IF EXISTS "tenant_isolation_DataSource" ON "DataSource";
 DROP POLICY IF EXISTS "tenant_isolation_DataSourceMapping" ON "DataSourceMapping";
 DROP POLICY IF EXISTS "tenant_isolation_WebhookEndpoint" ON "WebhookEndpoint";
@@ -15,6 +17,34 @@ DROP POLICY IF EXISTS "tenant_isolation_EmbedVisibleMetric" ON "EmbedVisibleMetr
 DROP POLICY IF EXISTS "tenant_isolation_ApiKey" ON "ApiKey";
 DROP POLICY IF EXISTS "tenant_isolation_AnomalyEvent" ON "AnomalyEvent";
 DROP POLICY IF EXISTS "tenant_isolation_AlertDelivery" ON "AlertDelivery";
+
+ALTER TABLE "Tenant" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Tenant" FORCE ROW LEVEL SECURITY;
+CREATE POLICY "user_tenant_access_Tenant"
+ON "Tenant"
+FOR ALL
+USING (
+  "ownerId" = current_setting('app.current_user_id', true)
+  OR "id" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  "ownerId" = current_setting('app.current_user_id', true)
+  OR "id" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "TenantMembership" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "TenantMembership" FORCE ROW LEVEL SECURITY;
+CREATE POLICY "user_tenant_access_TenantMembership"
+ON "TenantMembership"
+FOR ALL
+USING (
+  "userId" = current_setting('app.current_user_id', true)
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  "userId" = current_setting('app.current_user_id', true)
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
 
 ALTER TABLE "DataSource" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "DataSource" FORCE ROW LEVEL SECURITY;
