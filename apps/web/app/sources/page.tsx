@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { getActiveTenant } from "@/lib/tenant";
-import { withTenantContext } from "@repo/db";
+import { withTenantReadContext } from "@repo/db";
 
 function formatDate(date?: Date | null) {
   if (!date) {
@@ -94,9 +94,8 @@ export default async function SourcesPage() {
   const { membership } = activeTenant;
   const tenantId = membership.tenant.id;
   const [sources, runs, errors, sourceCount, pointCount] =
-    await withTenantContext(tenantId, async (tx) =>
-      Promise.all([
-        tx.dataSource.findMany({
+    await withTenantReadContext(tenantId, (db) => [
+        db.dataSource.findMany({
           where: { tenantId },
           orderBy: { updatedAt: "desc" },
           take: 8,
@@ -110,7 +109,7 @@ export default async function SourcesPage() {
             createdAt: true,
           },
         }),
-        tx.ingestionRun.findMany({
+        db.ingestionRun.findMany({
           where: { tenantId },
           orderBy: { startedAt: "desc" },
           take: 8,
@@ -129,7 +128,7 @@ export default async function SourcesPage() {
             },
           },
         }),
-        tx.ingestionError.findMany({
+        db.ingestionError.findMany({
           where: { tenantId },
           orderBy: { createdAt: "desc" },
           take: 8,
@@ -147,10 +146,9 @@ export default async function SourcesPage() {
             },
           },
         }),
-        tx.dataSource.count({ where: { tenantId } }),
-        tx.metricPoint.count({ where: { tenantId } }),
-      ]),
-    );
+        db.dataSource.count({ where: { tenantId } }),
+        db.metricPoint.count({ where: { tenantId } }),
+      ]);
 
   return (
     <main className="min-h-svh bg-background">
