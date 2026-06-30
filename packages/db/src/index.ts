@@ -52,6 +52,23 @@ export async function withTenantContext<T>(
   });
 }
 
+export async function withTenantReadContext<T extends readonly unknown[]>(
+  tenantId: string,
+  buildQueries: (
+    client: PrismaClient,
+  ) => { [K in keyof T]: Prisma.PrismaPromise<T[K]> },
+): Promise<T> {
+  const queries = buildQueries(prisma);
+  const results = (await prisma.$transaction([
+    prisma.$executeRaw`
+      SELECT set_config('app.current_tenant_id', ${tenantId}, true)
+    `,
+    ...queries,
+  ])) as [number, ...T];
+
+  return results.slice(1) as unknown as T;
+}
+
 export async function withUserContext<T>(
   userId: string,
   callback: (tx: Prisma.TransactionClient) => Promise<T>,

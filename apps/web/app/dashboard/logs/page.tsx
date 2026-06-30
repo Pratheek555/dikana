@@ -1,12 +1,12 @@
-import { OverviewRoute } from "@/components/dashboard/sections";
+import { LogsRoute } from "@/components/dashboard/sections";
 import { getDashboardData, WorkspaceEmptyState } from "@/lib/dashboard-data";
 
-export default async function DashboardPage() {
+export default async function DashboardLogsPage() {
   const data = await getDashboardData();
 
   if (!data) {
     return <WorkspaceEmptyState />;
   }
 
-  return <OverviewRoute data={data} />;
+  return <LogsRoute data={data} />;
 }
