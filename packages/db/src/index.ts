@@ -43,13 +43,16 @@ export async function withTenantContext<T>(
   tenantId: string,
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      SELECT set_config('app.current_tenant_id', ${tenantId}, true)
-    `;
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`
+        SELECT set_config('app.current_tenant_id', ${tenantId}, true)
+      `;
 
-    return callback(tx);
-  });
+      return callback(tx);
+    },
+    { timeout: 20_000 },
+  );
 }
 
 export async function withTenantReadContext<T extends readonly unknown[]>(
@@ -73,11 +76,14 @@ export async function withUserContext<T>(
   userId: string,
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      SELECT set_config('app.current_user_id', ${userId}, true)
-    `;
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`
+        SELECT set_config('app.current_user_id', ${userId}, true)
+      `;
 
-    return callback(tx);
-  });
+      return callback(tx);
+    },
+    { timeout: 20_000 },
+  );
 }
