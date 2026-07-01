@@ -136,6 +136,61 @@ export async function importCsvUpload(
     return { error: "Choose at least one numeric metric column." };
   }
 
+  const errors: Array<CsvErrorSample & { fieldName?: string }> = [];
+  const acceptedRowNumbers = new Set<number>();
+  const rejectedRowNumbers = new Set<number>();
+  const preparedMetricValues: Array<{
+    column: string;
+    timestamp: Date;
+    numberValue: number;
+  }> = [];
+
+  parsed.rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const timestampValue = row[timestampColumn] ?? "";
+    const timestamp = parseTimestamp(timestampValue);
+
+    if (!timestamp) {
+      rejectedRowNumbers.add(rowNumber);
+      errors.push({
+        rowNumber,
+        fieldName: timestampColumn,
+        message: "Invalid timestamp.",
+        rawValue: timestampValue,
+      });
+      return;
+    }
+
+    let rowHadPoint = false;
+
+    for (const column of selectedMetricColumns) {
+      const rawValue = row[column] ?? "";
+      const numberValue = parseNumericValue(rawValue);
+
+      if (numberValue === null) {
+        rejectedRowNumbers.add(rowNumber);
+        errors.push({
+          rowNumber,
+          fieldName: column,
+          message: "Missing or non-numeric metric value.",
+          rawValue,
+        });
+        continue;
+      }
+
+      rowHadPoint = true;
+      preparedMetricValues.push({
+        column,
+        timestamp,
+        numberValue,
+      });
+    }
+
+    if (rowHadPoint) {
+      acceptedRowNumbers.add(rowNumber);
+    }
+  });
+
   const importResult = await withTenantContext(tenantId, async (tx) => {
     const dataSource = await tx.dataSource.create({
       data: {
@@ -231,7 +286,6 @@ export async function importCsvUpload(
       },
     });
 
-    const errors: Array<CsvErrorSample & { fieldName?: string }> = [];
     const metricPoints: Array<{
       tenantId: string;
       metricId: string;
@@ -243,61 +297,26 @@ export async function importCsvUpload(
         sourceName: string;
       };
     }> = [];
-    const acceptedRowNumbers = new Set<number>();
-    const rejectedRowNumbers = new Set<number>();
 
-    parsed.rows.forEach((row, index) => {
-      const rowNumber = index + 2;
-      const timestampValue = row[timestampColumn] ?? "";
-      const timestamp = parseTimestamp(timestampValue);
+    for (const preparedValue of preparedMetricValues) {
+      const metric = metricsByColumn.get(preparedValue.column);
 
-      if (!timestamp) {
-        rejectedRowNumbers.add(rowNumber);
-        errors.push({
-          rowNumber,
-          fieldName: timestampColumn,
-          message: "Invalid timestamp.",
-          rawValue: timestampValue,
-        });
-        return;
+      if (!metric) {
+        continue;
       }
 
-      let rowHadPoint = false;
-
-      for (const column of selectedMetricColumns) {
-        const rawValue = row[column] ?? "";
-        const numberValue = parseNumericValue(rawValue);
-        const metric = metricsByColumn.get(column);
-
-        if (numberValue === null || !metric) {
-          rejectedRowNumbers.add(rowNumber);
-          errors.push({
-            rowNumber,
-            fieldName: column,
-            message: "Missing or non-numeric metric value.",
-            rawValue,
-          });
-          continue;
-        }
-
-        rowHadPoint = true;
-        metricPoints.push({
-          tenantId,
-          metricId: metric.id,
-          dataSourceId: dataSource.id,
-          timestamp,
-          numberValue,
-          dimensions: {
-            sourceColumn: column,
-            sourceName,
-          },
-        });
-      }
-
-      if (rowHadPoint) {
-        acceptedRowNumbers.add(rowNumber);
-      }
-    });
+      metricPoints.push({
+        tenantId,
+        metricId: metric.id,
+        dataSourceId: dataSource.id,
+        timestamp: preparedValue.timestamp,
+        numberValue: preparedValue.numberValue,
+        dimensions: {
+          sourceColumn: preparedValue.column,
+          sourceName,
+        },
+      });
+    }
 
     if (metricPoints.length > 0) {
       await tx.metricPoint.createMany({
