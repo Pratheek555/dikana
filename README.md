@@ -12,11 +12,13 @@ Implemented:
 - App database reads and writes run inside session-scoped tenant context with `app.current_tenant_id`.
 - Tenant membership lookup runs inside user context with `app.current_user_id`.
 - CSV upload flow at `/sources` previews headers, maps timestamp and metric columns, and imports metric points.
+- Webhook ingestion endpoint validates tenant/public endpoint IDs, JSON payloads, payload size, and webhook secrets before storing raw events.
+- Accepted webhook events update source sync metadata and create ingestion log entries for dashboard visibility.
 - `/dashboard` reads tenant-scoped sources, metrics, metric points, ingestion runs, and anomalies.
 
 Still planned for later days:
 
-- Webhook ingestion and realtime Socket.IO updates.
+- Webhook metric mapping and realtime Socket.IO updates.
 - Dashboard builder.
 - Embed widget.
 - Anomaly scheduler and email delivery.

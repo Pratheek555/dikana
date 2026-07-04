@@ -2,32 +2,56 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import type { NextRequest } from "next/server";
 import { withTenantContext } from "@repo/db";
+
 const MAX_WEBHOOK_PAYLOAD_BYTES = 256 * 1024;
 
-// time safe comparision of webhook secrets
-// What is time safe comparision?
-// It compares two buffers in constant time, regardless of their contents.
-// in simpler terms, it prevents timing attacks by not revealing which buffer is larger.
-// what is timing attacks?
-// A timing attack is a type of attack that exploits the time taken to execute a particular operation,
-// such as comparing two buffers, to deduce sensitive information about the operation's input.
-// example: an attacker could measure the time taken to compare two secret hashes,
-// and deduce which hash is larger, thus revealing the secret.
-// why use timingSafeEqual instead of a simple equality check?
-// timingSafeEqual compares two buffers in constant time, regardless of their contents,
-// while a simple equality check would reveal which buffer is larger, thus revealing the secret.
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+type JsonObject = { [key: string]: JsonValue };
+
 function hashWebhookSecret(secret: string) {
   return createHash("sha256").update(secret).digest("base64url");
 }
 
 function isWebhookSecretValid(secret: string, secretHash: string) {
   const provided = Buffer.from(hashWebhookSecret(secret), "base64url");
-  const expected = Buffer.from(hashWebhookSecret(secretHash), "base64url");
+  const expected = Buffer.from(secretHash, "base64url");
 
   return (
     provided.byteLength === expected.byteLength &&
     timingSafeEqual(provided, expected)
   );
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every(isJsonValue);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+
+  return isJsonObject(value);
 }
 
 export async function POST(
@@ -58,14 +82,14 @@ export async function POST(
     );
   }
 
-  let payload: Record<string, unknown>;
+  let parsedPayload: unknown;
   try {
-    payload = await _req.json();
+    parsedPayload = await _req.json();
   } catch {
     return Response.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+  if (!isJsonObject(parsedPayload)) {
     return Response.json(
       { error: "Payload must be a JSON object" },
       { status: 400 },
@@ -119,17 +143,48 @@ export async function POST(
     return Response.json({ error: "Data source not found" }, { status: 404 });
   }
 
-  let webHookEventStore: unknown;
+  const dataSourceId = endpoint.dataSourceId;
+  let eventId: string;
+
   try {
-    webHookEventStore = await withTenantContext(tenantId, async (tx) => {
-      return await tx.rawEvent.create({
+    const storedEvent = await withTenantContext(tenantId, async (tx) => {
+      const rawEvent = await tx.rawEvent.create({
         data: {
-          tenantId: tenantId,
-          dataSourceId: String(endpoint.dataSourceId),
-          payload: payload as Record<string, unknown>,
+          tenantId,
+          dataSourceId,
+          payload: parsedPayload,
+        },
+        select: {
+          id: true,
         },
       });
+
+      await tx.ingestionRun.create({
+        data: {
+          tenantId,
+          status: "SUCCEEDED",
+          dataSourceId,
+          rowsRead: 1,
+          rowsInserted: 1,
+          summary: {
+            rawEventId: rawEvent.id,
+            endpointId: endpoint.id,
+          },
+        },
+      });
+
+      await tx.dataSource.update({
+        where: { id: dataSourceId },
+        data: {
+          lastSyncedAt: new Date(),
+          recordCount: { increment: 1 },
+        },
+      });
+
+      return rawEvent;
     });
+
+    eventId = storedEvent.id;
   } catch (error) {
     console.error(error);
     return Response.json(
@@ -139,9 +194,7 @@ export async function POST(
   }
 
   return Response.json({
-    tenantId,
-    publicId,
-    dataSourceId: endpoint.dataSourceId,
-    webHookEventStore,
+    accepted: true,
+    eventId,
   });
 }
